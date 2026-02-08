@@ -1,0 +1,76 @@
+name: Fetch Gym Data
+
+on:
+  schedule:
+    # Weekdays — broad UTC range covering both winter (UTC+2) and summer (UTC+3)
+    # for Kyiv 07:00–22:00. Exact filtering done in the time-check step.
+    - cron: '*/10 4-19 * * 1-5'
+    # Weekends — broad UTC range for Kyiv 09:00–21:00
+    - cron: '*/10 6-18 * * 0,6'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-gym-data
+  cancel-in-progress: false
+
+env:
+  TZ: Europe/Kyiv
+
+jobs:
+  fetch-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if within operating hours (Kyiv time)
+        id: time-check
+        run: |
+          HOUR=$(date +%-H)
+          DOW=$(date +%u)  # 1=Mon … 7=Sun
+
+          if [ "$DOW" -le 5 ]; then
+            # Weekdays: 07:00–21:59 Kyiv
+            if [ "$HOUR" -ge 7 ] && [ "$HOUR" -le 21 ]; then
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping — outside weekday window (Kyiv hour: $HOUR)"
+            fi
+          else
+            # Weekends: 09:00–20:59 Kyiv
+            if [ "$HOUR" -ge 9 ] && [ "$HOUR" -le 20 ]; then
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping — outside weekend window (Kyiv hour: $HOUR)"
+            fi
+          fi
+
+      - name: Checkout repository
+        if: steps.time-check.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: steps.time-check.outputs.should_run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        if: steps.time-check.outputs.should_run == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Fetch gym data
+        if: steps.time-check.outputs.should_run == 'true'
+        env:
+          SPORTLIFE_AUTH_KEY: ${{ secrets.SPORTLIFE_AUTH_KEY }}
+          SPORTLIFE_GYM_ID: ${{ secrets.SPORTLIFE_GYM_ID }}
+        run: python fetch_gym_data.py
+
+      - name: Commit changes
+        uses: EndBug/add-and-commit@v9
+        with:
+          default_author: "github_actions"
+          message: "Update gym data"
