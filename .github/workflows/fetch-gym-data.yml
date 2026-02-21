@@ -71,6 +71,7 @@ jobs:
         run: python fetch_gym_data.py
 
       - name: Commit changes
+        if: steps.time-check.outputs.should_run == 'true'
         uses: EndBug/add-and-commit@v9
         with:
           default_author: "github_actions"
